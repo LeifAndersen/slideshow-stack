@@ -1,9 +1,11 @@
-#lang info
-(define collection "slideshow-stack")
+#lang setup/infotab
+(define collection 'multi)
 (define deps '("base"
-               "rackunit-lib"))
+               "rackunit-lib"
+               "slideshow-lib"
+               "pict-lib"
+               "unstable-lib"
+               "typed-racket-lib"))
 (define build-deps '("scribble-lib" "racket-doc"))
-(define scribblings '(("scribblings/slideshow-stack.scrbl" ())))
-(define pkg-desc "Description Here")
+;(define scribblings '(("slideshow/scribblings/slideshow-stack.scrbl" ())))
 (define version "0.0")
-(define pkg-authors '(leif))
