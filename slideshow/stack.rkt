@@ -1,6 +1,8 @@
 #lang typed/racket/base/no-check
 
-(provide stack-do)
+(provide stack-do
+         make-stack
+         make-stack-frame)
 (require (for-syntax typed/racket/base/no-check
                      racket/match
                      racket/list
@@ -27,6 +29,10 @@
                [xpos : Number]
                [ypos : Number])
   #:prefab)
+(define (make-stack #:frames [frames null]
+                    #:xpos [xpos 0]
+                    #:ypos [ypos 1])
+  (stack frames xpos ypos))
 
 (struct stack-frame ([name : String]
                      [color : String]
@@ -169,7 +175,8 @@
 ;; stack-do
 ;;
 (begin-for-syntax
-  (struct operation ([id : Syntax]
+  (struct operation ([type : Symbol]
+                     [id : Syntax]
                      [pict-op : Syntax]
                      [op : Syntax])
     #:prefab))
@@ -180,30 +187,44 @@
        (for/list ([command (in-list (syntax->list #'(commands ...)))])
          (syntax-parse command
            [((~datum push) id frames ...)
-            (operation #'id
+            (operation 'stack
+                       #'id
                        #'(stack-pict-push (dict-ref state id) frames ...)
                        #'(stack-push (dict-ref state id) frames ...))]
            [((~datum pop) id count)
-            (operation #'id
+            (operation 'stack
+                       #'id
                        #'(stack-pict-pop (dict-ref state id) count)
-                       #'(stack-pop (dict-ref state id) count))])))
+                       #'(stack-pop (dict-ref state id) count))]
+           [((~datum background) pict)
+            (operation 'background
+                       #'#f
+                       #'pict
+                       #'#f)])))
      #`(begin
          (define state start)
+         (define background ((pslide-base-pict)))
          (slide
           (for/fold ([acc ((pslide-base-pict))])
                     ([(k v) state])
             (cc-superimpose (stack-pict-start v) acc)))
          #,@(append* (for/list ([s (in-list states)])
                        (match s
-                         [(struct* operation ([id id]
+                         [(struct* operation ([type 'background]
+                                              [pict-op pict-op]))
+                          (list #`(set! background #,pict-op))]
+                         [(struct* operation ([type 'stack]
+                                              [id id]
                                               [pict-op pict-op]
                                               [op op]))
                           (list #`(play-n
-                                   #:steps 15
+                                   #:steps 20
                                    #:delay 0.01
                                    #:skip-first? #t
                                    (lambda (n)
-                                     (apply cc-superimpose (#,pict-op n)
+                                     (apply cc-superimpose
+                                            background
+                                            (#,pict-op n)
                                             (for/list ([(k v) state]
                                                        #:unless (equal? k #,id))
                                               (stack-pict-start v)))))
@@ -228,13 +249,13 @@
        1))
 
   (play-n
-   #:steps 30
+   #:steps 20
    #:delay 0.01
    #:skip-last? #t
    (stack-pict-push test-stack1 test-frame2))
 
   (play-n
-   #:steps 30
+   #:steps 20
    #:delay 0.01
    (stack-pict-pop test-stack2 1))
 
