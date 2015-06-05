@@ -67,7 +67,7 @@
          (struct-copy stack st [frames (list-tail fr count)])
          (raise-user-error "Stack does not have ~a elements" count))]))
 
-(: stack-insert (stack (Dict stack-frame Positive-Integer) -> stack))
+(: stack-insert (stack (Dict (Listof stack-frame) Positive-Integer) -> stack))
 (define (stack-insert st frame-pairs)
   (match st
     ([struct* stack ([frames fr])]
@@ -75,7 +75,7 @@
                   [frames (append* (for/list ([index (in-range (length fr))]
                                               [i (in-list st)])
                                      (if (dict-has-key? frame-pairs index)
-                                         (list (dict-ref frame-pairs index) i)
+                                         (append (dict-ref frame-pairs index) (list i))
                                          (list i))))]))))
 
 (: stack-remove (stack (Setof Positive-Integer) -> stack))
@@ -170,6 +170,34 @@
                  (* 1000 n)
                  final-st-pict))]))
 
+(define (stack-pict-insert st frame-pairs)
+  (define st-pict (stack->pict st))
+  (define final-stack (stack-insert st))
+  (define final-st-pict (stack->pict final-stack))
+  (match st
+    [(struct* stack ([xpos xpos]
+                     [ypos ypos]))
+     (lambda (n)
+       (ppict-do ((pslide-base-pict))
+                 #:go (coord xpos ypos 'lb)
+                 (if (n . <= . 1/2)
+                     st-pict
+                     final-st-pict)))]))
+
+(define (stack-pict-remove st frame-indexes)
+  (define st-pict (stack->pict st))
+  (define final-stack (stack-remove st frame-indexes))
+  (define final-st-pict (stack->pict final-stack))
+  (match st
+    [(struct* stack ([xpos xpos]
+                     [ypos ypos]))
+     (lambda (n)
+       (ppict-do ((pslide-base-pict))
+                 #:go (coord xpos ypos 'lb)
+                 (if (n . <= . 1/2)
+                     st-pict
+                     final-st-pict)))]))
+
 ;; ===================================================================================================
 ;;
 ;; stack-do
@@ -196,23 +224,40 @@
                        #'id
                        #'(stack-pict-pop (dict-ref state id) count)
                        #'(stack-pop (dict-ref state id) count))]
+           [((~datum insert) id frame-pairs)
+            (operation 'stack
+                       #'id
+                       #'(stack-pict-insert (dict-ref state id) frame-pairs)
+                       #'(stack-insert (dict-ref state id) frame-pairs))]
+           [((~datum remove) id frame-indexes)
+            (operation 'stack
+                       #'id
+                       #'(stack-pict-remove (dict-ref state id) frame-indexes)
+                       #'(stack-remove (dict-ref state id) frame-indexes))]
            [((~datum background) pict)
             (operation 'background
                        #'#f
                        #'pict
+                       #'#f)]
+           [((~datum next))
+            (operation 'next
+                       #'#f
+                       #'#f
                        #'#f)])))
      #`(begin
          (define state start)
          (define background ((pslide-base-pict)))
-         (slide
-          (for/fold ([acc ((pslide-base-pict))])
-                    ([(k v) state])
-            (cc-superimpose (stack-pict-start v) acc)))
          #,@(append* (for/list ([s (in-list states)])
                        (match s
                          [(struct* operation ([type 'background]
                                               [pict-op pict-op]))
                           (list #`(set! background #,pict-op))]
+                         [(struct* operation ([type 'next]))
+                          (list #`(slide
+                                   (apply cc-superimpose
+                                          background
+                                          (for/list ([(k v) state])
+                                            (stack-pict-start v)))))]
                          [(struct* operation ([type 'stack]
                                               [id id]
                                               [pict-op pict-op]
@@ -221,6 +266,7 @@
                                    #:steps 20
                                    #:delay 0.01
                                    #:skip-first? #t
+                                   #:skip-last? #t
                                    (lambda (n)
                                      (apply cc-superimpose
                                             background
