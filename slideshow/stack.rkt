@@ -2,7 +2,8 @@
 
 (provide stack-do
          make-stack
-         make-stack-frame)
+         make-stack-frame
+         make-stack-frame-rectangle)
 (require (for-syntax typed/racket/base/no-check
                      racket/match
                      racket/list
@@ -27,27 +28,34 @@
 
 (struct stack ([frames : (Listof stack-frame)]
                [xpos : Number]
-               [ypos : Number])
+               [ypos : Number]
+               [width : (U Positive-Integer #f)])
   #:prefab)
-(define (make-stack #:frames [frames null]
-                    #:xpos [xpos 0]
-                    #:ypos [ypos 1])
-  (stack frames xpos ypos))
+(define (make-stack #:xpos [xpos 0]
+                    #:ypos [ypos 1]
+                    #:width [width #f]
+                    . frames)
+  (stack frames xpos ypos width))
 
-(struct stack-frame ([name : String]
-                     [color : String]
+(struct stack-frame ([pict : Pict]
                      [height : Positive-Integer]
-                     [width : Positive-Integer]
-                     [font : Font]
-                     [font-size : Positive-Integer])
+                     [width : Positive-Integer])
   #:prefab)
-(define (make-stack-frame name
-                          #:color [color (current-frame-color)]
-                          #:height [height (current-frame-height)]
-                          #:width [width (current-frame-width)]
-                          #:font [font (current-frame-font)]
-                          #:font-size [font-size (current-frame-font-size)])
-  (stack-frame name color height width font font-size))
+(define (make-stack-frame p #:width [width #f] #:height [height #f])
+  (define w* (or width (pict-width p)))
+  (define h* (or height (pict-height p)))
+  (stack-frame p h* w*))
+
+(define (make-stack-frame-rectangle name
+                                    #:color [color (current-frame-color)]
+                                    #:height [height (current-frame-height)]
+                                    #:width [width (current-frame-width)]
+                                    #:font [font (current-frame-font)]
+                                    #:font-size [font-size (current-frame-font-size)])
+  (stack-frame (cc-superimpose (colorize (filled-rectangle width height) color)
+                               (rectangle width height)
+                               (text name font font-size))
+               width height))
 
 ;; ===================================================================================================
 ;;
@@ -73,7 +81,7 @@
     ([struct* stack ([frames fr])]
      (struct-copy stack st
                   [frames (append* (for/list ([index (in-range (length fr))]
-                                              [i (in-list st)])
+                                              [i (in-list fr)])
                                      (if (dict-has-key? frame-pairs index)
                                          (append (dict-ref frame-pairs index) (list i))
                                          (list i))))]))))
@@ -91,43 +99,31 @@
 (: stack-split (stack (Setof Positive Integer) #:direction (U 'bottom 'top) -> (Listof Stack)))
 (define (stack-split st splits #:direction [direction 'bottom])
   (match st
-     [(struct* stack ([frames frames]
-                     [xpos xpos]
-                     [ypos ypos]))
-     (define splits* (for/set ([i (in-set splits)])
-                       (if (equal? direction 'bottom) (- (length frames) i) i)))
-     (define-values (current-stack return-stacks)
-       (for/fold ([current-stack null]
-                  [return-stacks null])
-                 ([index (in-range (length frames))]
-                  [i (in-list frames)])
-         (if (set-member? splits* index)
-             (values (list i) (append return-stacks (list current-stack)))
-             (values (append current-stack (list i)) return-stacks))))
-     (set-map (append return-stacks (list current-stack)) (lambda (x) (stack x xpos ypos)))]))
+     [(struct* stack ([frames frames]))
+      (define splits* (for/set ([i (in-set splits)])
+                        (if (equal? direction 'bottom) (- (length frames) i) i)))
+      (define-values (current-stack return-stacks)
+        (for/fold ([current-stack null]
+                   [return-stacks null])
+                  ([index (in-range (length frames))]
+                   [i (in-list frames)])
+          (if (set-member? splits* index)
+              (values (list i) (append return-stacks (list current-stack)))
+              (values (append current-stack (list i)) return-stacks))))
+      (set-map (append return-stacks (list current-stack)) (lambda (x) (struct-copy stack st [frames x])))]))
 
 ;; ===================================================================================================
 ;;
 ;; Stack Renderers
 ;;
-(: stack-frame->pict (frame -> pict))
-(define (stack-frame->pict frame)
-  (match frame
-    [(struct* stack-frame ([name name]
-                           [color color]
-                           [height height]
-                           [width width]
-                           [font font]
-                           [font-size font-size]))
-     (cc-superimpose (colorize (filled-rectangle width height) color)
-                     (rectangle width height)
-                     (text name font font-size))]))
 
 (: stack->pict (stack -> pict))
 (define (stack->pict st)
   (match st
-    [(struct* stack ([frames frames]))
-     (apply vc-append 0 (map stack-frame->pict frames))]))
+    [(struct* stack ([frames (list (struct* stack-frame ([pict p]
+                                                         [height h]
+                                                         [width w])) ...)]))
+     (apply vc-append 0 p)]))
 
 ;; ===================================================================================================
 ;;
@@ -144,7 +140,7 @@
 
 (define (stack-pict-push st . frames)
   (define st-pict (stack->pict st))
-  (define frame-picts (map stack-frame->pict frames))
+  (define frame-picts (map stack-frame-pict frames))
   (match st
     [(struct* stack ([xpos xpos]
                      [ypos ypos]))
@@ -155,6 +151,20 @@
                 (apply vl-append frame-picts)
                 (* 1000 (- 1 n))
                 st-pict))]))
+
+(define (stack-pict-push-plain st . frames)
+  (define st-pict (stack->pict st))
+  (define final-stack (apply stack-push st frames))
+  (define final-st-pict (stack->pict final-stack))
+  (match st
+    [(struct* stack ([xpos xpos]
+                     [ypos ypos]))
+     (lambda (n)
+       (ppict-do ((pslide-base-pict))
+                 #:go (coord xpos ypos 'lb)
+                 (if (n . <= . 1/2)
+                     st-pict
+                     final-st-pict)))]))
 
 (define (stack-pict-pop st count)
   (define final-st (stack-pop st count))
@@ -172,7 +182,7 @@
 
 (define (stack-pict-insert st frame-pairs)
   (define st-pict (stack->pict st))
-  (define final-stack (stack-insert st))
+  (define final-stack (stack-insert st frame-pairs))
   (define final-st-pict (stack->pict final-stack))
   (match st
     [(struct* stack ([xpos xpos]
@@ -218,6 +228,11 @@
             (operation 'stack
                        #'id
                        #'(stack-pict-push (dict-ref state id) frames ...)
+                       #'(stack-push (dict-ref state id) frames ...))]
+           [((~datum push-plain) id frames ...)
+            (operation 'stack
+                       #'id
+                       #'(stack-pict-push-plain (dict-ref state id) frames ...)
                        #'(stack-push (dict-ref state id) frames ...))]
            [((~datum pop) id count)
             (operation 'stack
@@ -280,7 +295,7 @@
 ;;
 ;; Test
 ;;
-(module+ teset
+(module+ test
   (define test-frame1 (make-stack-frame "hello"))
   (define test-frame2 (make-stack-frame "world" #:color "green"))
   (define test-stack1 (stack (list test-frame1) 0 1))
