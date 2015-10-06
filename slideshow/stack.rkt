@@ -54,7 +54,9 @@
                                     #:font-size [font-size (current-frame-font-size)])
   (stack-frame (cc-superimpose (colorize (filled-rectangle width height) color)
                                (rectangle width height)
-                               (text name font font-size))
+                               (cond
+                                 [(string? name) (text name font font-size)]
+                                 [(pict? name)   name]))
                width height))
 
 ;; ===================================================================================================
